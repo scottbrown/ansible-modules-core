@@ -63,6 +63,11 @@ options:
   key:
     description:
       - The path to the private key of the certificate in PEM encoded format.
+      - This variable and 'key_contents' are mutual exclusive.
+  key_contents:
+    description:
+      - The contents of a private key, held in a (hopefully-encrypted) variable.
+      - This variable and 'key' are mutual exclusive.
   dup_ok:
     description:
       - By default the module will not upload a certificate that is already uploaded into AWS. If set to True, it will upload the certificate as long as the name is unique.
@@ -220,6 +225,22 @@ def cert_action(module, iam, name, cpath, new_name, new_path, state,
             changed=False
             module.exit_json(changed=changed, msg='Certificate with the name %s already absent' % name)
 
+def private_key_from_file_or_inline(module):
+    '''Returns the certificate's private key from either a file or inline'''
+    key_file = module.params.get('key')
+    key_contents = module.params.get('key_contents')
+
+    if key_file is not None and key_contents is not None:
+        module.fail_json(msg="key or key_contents can be specified, not both.")
+
+    private_key = ""
+    if key_contents is None:
+        private_key = open(module.params.get('key'), 'r').read().rstrip()
+    else
+        private_key = key_contents
+
+    return private_key
+
 def main():
     argument_spec = ec2_argument_spec()
     argument_spec.update(dict(
@@ -228,6 +249,7 @@ def main():
         name=dict(default=None, required=False),
         cert=dict(default=None, required=False),
         key=dict(default=None, required=False),
+        key_contents=dict(default=None, required=False),
         cert_chain=dict(default=None, required=False),
         new_name=dict(default=None, required=False),
         path=dict(default='/', required=False),
@@ -263,7 +285,7 @@ def main():
     dup_ok = module.params.get('dup_ok')
     if state == 'present':
         cert = open(module.params.get('cert'), 'r').read().rstrip()
-        key = open(module.params.get('key'), 'r').read().rstrip()
+        key = private_key_from_file_or_inline(module)
         if cert_chain is not None:
             cert_chain = open(module.params.get('cert_chain'), 'r').read()
     else:
