@@ -236,7 +236,7 @@ def private_key_from_file_or_inline(module):
     private_key = ""
     if key_contents is None:
         private_key = open(module.params.get('key'), 'r').read().rstrip()
-    else
+    else:
         private_key = key_contents
 
     return private_key
