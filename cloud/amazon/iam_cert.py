@@ -230,9 +230,6 @@ def private_key_from_file_or_inline(module):
     key_file = module.params.get('key')
     key_contents = module.params.get('key_contents')
 
-    if key_file is not None and key_contents is not None:
-        module.fail_json(msg="key or key_contents can be specified, not both.")
-
     private_key = ""
     if key_contents is None:
         private_key = open(module.params.get('key'), 'r').read().rstrip()
@@ -260,7 +257,7 @@ def main():
 
     module = AnsibleModule(
         argument_spec=argument_spec,
-        mutually_exclusive=[],
+        mutually_exclusive=[['key', 'key_contents']],
     )
 
     if not HAS_BOTO:
