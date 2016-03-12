@@ -225,6 +225,7 @@ def cert_action(module, iam, name, cpath, new_name, new_path, state,
             changed=False
             module.exit_json(changed=changed, msg='Certificate with the name %s already absent' % name)
 
+
 def private_key_from_file_or_inline(module):
     '''Returns the certificate's private key from either a file or inline'''
     key_file = module.params.get('key')
@@ -232,11 +233,12 @@ def private_key_from_file_or_inline(module):
 
     private_key = ""
     if key_contents is None:
-        private_key = open(module.params.get('key'), 'r').read().rstrip()
+        private_key = open(key_file, 'r').read().rstrip()
     else:
         private_key = key_contents
 
     return private_key
+
 
 def main():
     argument_spec = ec2_argument_spec()
