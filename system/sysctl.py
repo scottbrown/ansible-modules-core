@@ -275,7 +275,8 @@ class SysctlModule(object):
                 f = open(self.sysctl_file, "r")
                 lines = f.readlines()
                 f.close()
-            except IOError, e:
+            except IOError:
+                e = get_exception()
                 self.module.fail_json(msg="Failed to open %s: %s" % (self.sysctl_file, str(e)))
 
         for line in lines:
@@ -325,7 +326,8 @@ class SysctlModule(object):
         try:
             for l in self.fixed_lines:
                 f.write(l.strip() + "\n")
-        except IOError, e:
+        except IOError:
+            e = get_exception()
             self.module.fail_json(msg="Failed to write to file %s: %s" % (tmp_path, str(e)))
         f.flush()
         f.close()
@@ -348,16 +350,16 @@ def main():
             reload = dict(default=True, type='bool'),
             sysctl_set = dict(default=False, type='bool'),
             ignoreerrors = dict(default=False, type='bool'),
-            sysctl_file = dict(default='/etc/sysctl.conf')
+            sysctl_file = dict(default='/etc/sysctl.conf', type='path')
         ),
         supports_check_mode=True
     )
 
-    result = SysctlModule(module)    
+    result = SysctlModule(module)
 
     module.exit_json(changed=result.changed)
-    sys.exit(0)
 
 # import module snippets
 from ansible.module_utils.basic import *
-main()
+if __name__ == '__main__':
+    main()

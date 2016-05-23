@@ -237,7 +237,7 @@ def main():
         power=dict(required=False, default='present'),
         deploy=dict(required=False, default=True),
         wait=dict(type='bool', required=False, default=False),
-        timeout=dict(required=False, default=1800),
+        timeout=dict(required=False, type='int', default=1800),
     )
     module_kwargs = openstack_module_kwargs()
     module = AnsibleModule(argument_spec, **module_kwargs)
@@ -365,4 +365,6 @@ def main():
 # this is magic, see lib/ansible/module_common.py
 from ansible.module_utils.basic import *
 from ansible.module_utils.openstack import *
-main()
+
+if __name__ == "__main__":
+    main()

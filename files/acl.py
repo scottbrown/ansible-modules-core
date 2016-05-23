@@ -206,7 +206,8 @@ def run_acl(module, cmd, check_rc=True):
 
     try:
         (rc, out, err) = module.run_command(' '.join(cmd), check_rc=check_rc)
-    except Exception, e:
+    except Exception:
+        e = get_exception()
         module.fail_json(msg=e.strerror)
 
     lines = out.splitlines()
@@ -218,12 +219,9 @@ def run_acl(module, cmd, check_rc=True):
 
 
 def main():
-    if get_platform().lower() != 'linux':
-        module.fail_json(msg="The acl module is only available for Linux distributions.")
-
     module = AnsibleModule(
         argument_spec=dict(
-            name=dict(required=True, aliases=['path'], type='str'),
+            name=dict(required=True, aliases=['path'], type='path'),
             entry=dict(required=False, type='str'),
             entity=dict(required=False, type='str', default=''),
             etype=dict(
@@ -245,7 +243,10 @@ def main():
         supports_check_mode=True,
     )
 
-    path = os.path.expanduser(module.params.get('name'))
+    if get_platform().lower() != 'linux':
+        module.fail_json(msg="The acl module is only available for Linux distributions.")
+
+    path = module.params.get('name')
     entry = module.params.get('entry')
     entity = module.params.get('entity')
     etype = module.params.get('etype')

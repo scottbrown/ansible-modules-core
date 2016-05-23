@@ -110,7 +110,7 @@ options:
      default: None
    floating_ip_pools:
      description:
-        - list of floating IP pools from which to choose a floating IP
+        - Name of floating IP pool from which to choose a floating IP
      required: false
      default: None
    meta:
@@ -167,6 +167,12 @@ options:
        - A list of preexisting volumes names or ids to attach to the instance
      required: false
      default: []
+   scheduler_hints:
+     description:
+        - Arbitrary key/value pairs to the scheduler for custom use
+     required: false
+     default: None
+     version_added: "2.1"
    state:
      description:
        - Should the resource be present or absent.
@@ -237,7 +243,7 @@ EXAMPLES = '''
       key_name: test
       timeout: 200
       flavor: 101
-      floating-ips:
+      floating_ips:
         - 12.34.56.79
 
 # Creates a new instance with 4G of RAM on Ubuntu Trusty, ignoring
@@ -450,8 +456,8 @@ def _create_server(module, cloud):
         config_drive=module.params['config_drive'],
     )
     for optional_param in (
-            'region_name', 'key_name', 'availability_zone', 'network',
-            'volume_size', 'volumes'):
+            'key_name', 'availability_zone', 'network',
+            'scheduler_hints', 'volume_size', 'volumes'):
         if module.params[optional_param]:
             bootkwargs[optional_param] = module.params[optional_param]
 
@@ -492,6 +498,8 @@ def _check_floating_ips(module, cloud, server):
                 auto_ip=auto_ip,
                 ips=floating_ips,
                 ip_pool=floating_ip_pools,
+                wait=module.params['wait'],
+                timeout=module.params['timeout'],
             )
             changed = True
         elif floating_ips:
@@ -502,7 +510,9 @@ def _check_floating_ips(module, cloud, server):
                 if ip not in ips:
                     missing_ips.append(ip)
             if missing_ips:
-                server = cloud.add_ip_list(server, missing_ips)
+                server = cloud.add_ip_list(server, missing_ips,
+                                           wait=module.params['wait'],
+                                           timeout=module.params['timeout'])
                 changed = True
             extra_ips = []
             for ip in ips:
@@ -544,17 +554,18 @@ def main():
         security_groups                 = dict(default=['default'], type='list'),
         network                         = dict(default=None),
         nics                            = dict(default=[], type='list'),
-        meta                            = dict(default=None),
-        userdata                        = dict(default=None),
+        meta                            = dict(default=None, type='raw'),
+        userdata                        = dict(default=None, aliases=['user_data']),
         config_drive                    = dict(default=False, type='bool'),
         auto_ip                         = dict(default=True, type='bool', aliases=['auto_floating_ip', 'public_ip']),
-        floating_ips                    = dict(default=None),
-        floating_ip_pools               = dict(default=None),
+        floating_ips                    = dict(default=None, type='list'),
+        floating_ip_pools               = dict(default=None, type='list'),
         volume_size                     = dict(default=False, type='int'),
         boot_from_volume                = dict(default=False, type='bool'),
         boot_volume                     = dict(default=None, aliases=['root_volume']),
         terminate_volume                = dict(default=False, type='bool'),
         volumes                         = dict(default=[], type='list'),
+        scheduler_hints                 = dict(default=None, type='dict'),
         state                           = dict(default='present', choices=['absent', 'present']),
     )
     module_kwargs = openstack_module_kwargs(

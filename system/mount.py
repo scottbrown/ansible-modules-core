@@ -32,43 +32,39 @@ options:
     description:
       - "path to the mount point, eg: C(/mnt/files)"
     required: true
-    default: null
-    aliases: []
   src:
     description:
-      - device to be mounted on I(name).
-    required: true
+        - device to be mounted on I(name). Required when C(state=present) or C(state=mounted)
+    required: false
     default: null
   fstype:
     description:
-      - file-system type
-    required: true
+      - file-system type. Required when C(state=present) or C(state=mounted)
+    required: false
     default: null
   opts:
     description:
-      - mount options (see fstab(8))
+      - mount options (see fstab(5))
     required: false
     default: null
   dump:
     description:
-      - "dump (see fstab(8)), Note that if nulled, C(state=present) will cease to work and duplicate entries will be made with subsequent runs."
+      - "dump (see fstab(5)), Note that if nulled, C(state=present) will cease to work and duplicate entries will be made with subsequent runs."
     required: false
     default: 0
   passno:
     description:
-      - "passno (see fstab(8)), Note that if nulled, C(state=present) will cease to work and duplicate entries will be made with subsequent runs."
+      - "passno (see fstab(5)), Note that if nulled, C(state=present) will cease to work and duplicate entries will be made with subsequent runs."
     required: false
     default: 0
   state:
     description:
-      - If C(mounted) or C(unmounted), the device will be actively mounted or unmounted
-        as needed and appropriately configured in I(fstab). 
-        C(absent) and C(present) only deal with
-        I(fstab) but will not affect current mounting. If specifying C(mounted) and the mount
-        point is not present, the mount point will be created. Similarly, specifying C(absent)        will remove the mount point directory.
+      - If C(mounted) or C(unmounted), the device will be actively mounted or unmounted as needed and appropriately configured in I(fstab).
+      - C(absent) and C(present) only deal with I(fstab) but will not affect current mounting.
+      - If specifying C(mounted) and the mount point is not present, the mount point will be created. Similarly.
+      - Specifying C(absent) will remove the mount point directory.
     required: true
     choices: [ "present", "absent", "mounted", "unmounted" ]
-    default: null
   fstab:
     description:
       - file to use instead of C(/etc/fstab). You shouldn't use that option
@@ -77,9 +73,7 @@ options:
     required: false
     default: /etc/fstab
 
-notes: []
-requirements: []
-author: 
+author:
     - Ansible Core Team
     - Seth Vidal
 '''
@@ -106,7 +100,10 @@ def write_fstab(lines, dest):
 
 def _escape_fstab(v):
     """ escape space (040), ampersand (046) and backslash (134) which are invalid in fstab fields """
-    return v.replace('\\', '\\134').replace(' ', '\\040').replace('&', '\\046')
+    if isinstance(v, int):
+        return v
+    else:
+        return v.replace('\\', '\\134').replace(' ', '\\040').replace('&', '\\046')
 
 def set_mount(module, **kwargs):
     """ set/change a mount point location in fstab """
@@ -119,11 +116,6 @@ def set_mount(module, **kwargs):
         fstab  = '/etc/fstab'
     )
     args.update(kwargs)
-
-    # save the mount name before space replacement
-    origname =  args['name']
-    # replace any space in mount name with '\040' to make it fstab compatible (man fstab)
-    args['name'] = args['name'].replace(' ', r'\040')
 
     new_line = '%(src)s %(name)s %(fstype)s %(opts)s %(dump)s %(passno)s\n'
 
@@ -164,14 +156,13 @@ def set_mount(module, **kwargs):
             to_write.append(line)
 
     if not exists:
-        to_write.append(new_line % args)
+        to_write.append(new_line % escaped_args)
         changed = True
 
     if changed and not module.check_mode:
         write_fstab(to_write, args['fstab'])
 
-    # mount function needs origname
-    return (origname, changed)
+    return (args['name'], changed)
 
 
 def unset_mount(module, **kwargs):
@@ -185,11 +176,6 @@ def unset_mount(module, **kwargs):
         fstab  = '/etc/fstab'
     )
     args.update(kwargs)
-
-    # save the mount name before space replacement
-    origname =  args['name']
-    # replace any space in mount name with '\040' to make it fstab compatible (man fstab)
-    args['name'] = args['name'].replace(' ', r'\040')
 
     to_write = []
     changed = False
@@ -220,8 +206,7 @@ def unset_mount(module, **kwargs):
     if changed and not module.check_mode:
         write_fstab(to_write, args['fstab'])
 
-    # umount needs origname
-    return (origname, changed)
+    return (args['name'], changed)
 
 
 def mount(module, **kwargs):
@@ -239,10 +224,10 @@ def mount(module, **kwargs):
     mount_bin = module.get_bin_path('mount')
 
     name = kwargs['name']
-    
+
     cmd = [ mount_bin, ]
-    
-    if os.path.ismount(name):
+
+    if ismount(name):
         cmd += [ '-o', 'remount', ]
 
     if get_platform().lower() == 'freebsd':
@@ -276,23 +261,27 @@ def main():
             state  = dict(required=True, choices=['present', 'absent', 'mounted', 'unmounted']),
             name   = dict(required=True),
             opts   = dict(default=None),
-            passno = dict(default=None),
+            passno = dict(default=None, type='str'),
             dump   = dict(default=None),
-            src    = dict(required=True),
-            fstype = dict(required=True),
+            src    = dict(required=False),
+            fstype = dict(required=False),
             fstab  = dict(default='/etc/fstab')
         ),
-        supports_check_mode=True
+        supports_check_mode=True,
+        required_if = (
+            ['state', 'mounted', ['src', 'fstype']],
+            ['state', 'present', ['src', 'fstype']]
+        )
     )
 
 
     changed = False
     rc = 0
-    args = {
-        'name': module.params['name'],
-        'src': module.params['src'],
-        'fstype': module.params['fstype']
-    }
+    args = {'name': module.params['name']}
+    if module.params['src'] is not None:
+        args['src'] = module.params['src']
+    if module.params['fstype'] is not None:
+        args['fstype'] = module.params['fstype']
     if module.params['passno'] is not None:
         args['passno'] = module.params['passno']
     if module.params['opts'] is not None:
@@ -319,7 +308,7 @@ def main():
     if state == 'absent':
         name, changed = unset_mount(module, **args)
         if changed and not module.check_mode:
-            if os.path.ismount(name):
+            if ismount(name):
                 res,msg  = umount(module, **args)
                 if res:
                     module.fail_json(msg="Error unmounting %s: %s" % (name, msg))
@@ -327,13 +316,14 @@ def main():
             if os.path.exists(name):
                 try:
                     os.rmdir(name)
-                except (OSError, IOError), e:
+                except (OSError, IOError):
+                    e = get_exception()
                     module.fail_json(msg="Error rmdir %s: %s" % (name, str(e)))
 
         module.exit_json(changed=changed, **args)
 
     if state == 'unmounted':
-        if os.path.ismount(name):
+        if ismount(name):
             if not module.check_mode:
                 res,msg  = umount(module, **args)
                 if res:
@@ -347,13 +337,14 @@ def main():
             if not os.path.exists(name) and not module.check_mode:
                 try:
                     os.makedirs(name)
-                except (OSError, IOError), e:
+                except (OSError, IOError):
+                    e = get_exception()
                     module.fail_json(msg="Error making dir %s: %s" % (name, str(e)))
 
         name, changed = set_mount(module, **args)
         if state == 'mounted':
             res = 0
-            if os.path.ismount(name):
+            if ismount(name):
                 if changed and not module.check_mode:
                     res,msg = mount(module, **args)
             elif 'bind' in args.get('opts', []):
@@ -380,8 +371,9 @@ def main():
         module.exit_json(changed=changed, **args)
 
     module.fail_json(msg='Unexpected position reached')
-    sys.exit(0)
 
 # import module snippets
 from ansible.module_utils.basic import *
+from ansible.module_utils.ismount import *
+
 main()

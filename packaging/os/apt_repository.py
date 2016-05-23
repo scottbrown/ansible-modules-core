@@ -273,7 +273,8 @@ class SourcesList(object):
 
                     try:
                         f.write(line)
-                    except IOError, err:
+                    except IOError:
+                        err = get_exception()
                         self.module.fail_json(msg="Failed to write to file %s: %s" % (tmp_path, unicode(err)))
                 self.module.atomic_move(tmp_path, filename)
 
@@ -287,7 +288,22 @@ class SourcesList(object):
                     os.remove(filename)
 
     def dump(self):
-        return '\n'.join([str(i) for i in self])
+        dumpstruct = {}
+        for filename, sources in self.files.items():
+            if sources:
+                lines = []
+                for n, valid, enabled, source, comment in sources:
+                    chunks = []
+                    if not enabled:
+                        chunks.append('# ')
+                    chunks.append(source)
+                    if comment:
+                        chunks.append(' # ')
+                        chunks.append(comment)
+                    chunks.append('\n')
+                    lines.append(''.join(chunks))
+                dumpstruct[filename] = ''.join(lines)
+        return dumpstruct
 
     def _choice(self, new, old):
         if new is None:
@@ -436,7 +452,7 @@ def main():
         argument_spec=dict(
             repo=dict(required=True),
             state=dict(choices=['present', 'absent'], default='present'),
-            mode=dict(required=False, default=0644),
+            mode=dict(required=False, default=int('0644',8)),
             update_cache = dict(aliases=['update-cache'], type='bool', default='yes'),
             filename=dict(required=False, default=None),
             # this should not be needed, but exists as a failsafe
@@ -473,22 +489,34 @@ def main():
             sourceslist.add_source(repo)
         elif state == 'absent':
             sourceslist.remove_source(repo)
-    except InvalidSource, err:
+    except InvalidSource:
+        err = get_exception()
         module.fail_json(msg='Invalid repository string: %s' % unicode(err))
 
     sources_after = sourceslist.dump()
     changed = sources_before != sources_after
 
-    if not module.check_mode and changed:
+    if changed and module._diff:
+        diff = []
+        for filename in set(sources_before.keys()).union(sources_after.keys()):
+            diff.append({'before': sources_before.get(filename, ''),
+                         'after': sources_after.get(filename, ''),
+                         'before_header': (filename, '/dev/null')[filename not in sources_before],
+                         'after_header': (filename, '/dev/null')[filename not in sources_after]})
+    else:
+        diff = {}
+
+    if changed and not module.check_mode:
         try:
             sourceslist.save()
             if update_cache:
                 cache = apt.Cache()
                 cache.update()
-        except OSError, err:
+        except OSError:
+            err = get_exception()
             module.fail_json(msg=unicode(err))
 
-    module.exit_json(changed=changed, repo=repo, state=state)
+    module.exit_json(changed=changed, repo=repo, state=state, diff=diff)
 
 # import module snippets
 from ansible.module_utils.basic import *
