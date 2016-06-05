@@ -46,6 +46,7 @@ description:
   - 'When environment variables are managed: no comment line is added, but, when the module
     needs to find/check the state, it uses the "name" parameter to find the environment
     variable definition line.'
+  - 'When using symbols such as %, they must be properly escaped.'
 version_added: "0.9"
 options:
   name:
@@ -488,7 +489,7 @@ class CronTab(object):
                 return "chown %s %s ; su '%s' -c '%s %s'" % (pipes.quote(self.user), pipes.quote(path), pipes.quote(self.user), CRONCMD, pipes.quote(path))
             else:
                 user = '-u %s' % pipes.quote(self.user)
-        return "%s %s %s" % (CRONCMD , pipes.quote(path), user)
+        return "%s %s %s" % (CRONCMD , user, pipes.quote(path))
 
 
 

@@ -20,6 +20,7 @@ module: ec2
 short_description: create, terminate, start or stop an instance in ec2
 description:
     - Creates or terminates ec2 instances.
+    - C(state=restarted) was added in 2.2
 version_added: "0.9"
 options:
   key_name:
@@ -212,7 +213,7 @@ options:
     required: false
     default: 'present'
     aliases: []
-    choices: ['present', 'absent', 'running', 'stopped']
+    choices: ['present', 'absent', 'running', 'restarted', 'stopped']
   volumes:
     version_added: "1.5"
     description:
@@ -499,6 +500,15 @@ EXAMPLES = '''
     state: running
 
 #
+# Restart instances specified by tag
+#
+- local_action:
+    module: ec2
+    instance_tags:
+        Name: ExtraPower
+    state: restarted
+
+#
 # Enforce that 5 instances with a tag "foo" are running
 # (Highly recommended!)
 #
@@ -734,8 +744,8 @@ def create_block_device(module, ec2, volume):
     # http://aws.amazon.com/about-aws/whats-new/2013/10/09/ebs-provisioned-iops-maximum-iops-gb-ratio-increased-to-30-1/
     MAX_IOPS_TO_SIZE_RATIO = 30
 
-    # device_type has been used historically to represent volume_type, 
-    # however ec2_vol uses volume_type, as does the BlockDeviceType, so 
+    # device_type has been used historically to represent volume_type,
+    # however ec2_vol uses volume_type, as does the BlockDeviceType, so
     # we add handling for either/or but not both
     if all(key in volume for key in ['device_type','volume_type']):
         module.fail_json(msg = 'device_type is a deprecated name for volume_type. Do not use both device_type and volume_type')
@@ -916,7 +926,7 @@ def create_instances(module, ec2, vpc, override_count=None):
                 group_id = [group_id]
             grp_details = ec2.get_all_security_groups(group_ids=group_id)
             group_name = [grp_item.name for grp_item in grp_details]
-    except boto.exception.NoAuthHandlerFound, e:
+    except boto.exception.NoAuthHandlerFound as e:
             module.fail_json(msg = str(e))
 
     # Lookup any instances that much our run id.
@@ -1095,7 +1105,7 @@ def create_instances(module, ec2, vpc, override_count=None):
                     if spot_wait_timeout <= time.time():
                         module.fail_json(msg = "wait for spot requests timeout on %s" % time.asctime())
                     instids = spot_req_inst_ids.values()
-        except boto.exception.BotoServerError, e:
+        except boto.exception.BotoServerError as e:
             module.fail_json(msg = "Instance creation failed => %s: %s" % (e.error_code, e.error_message))
 
         # wait here until the instances are up
@@ -1104,7 +1114,7 @@ def create_instances(module, ec2, vpc, override_count=None):
         while wait_timeout > time.time() and num_running < len(instids):
             try:
                 res_list = ec2.get_all_instances(instids)
-            except boto.exception.BotoServerError, e:
+            except boto.exception.BotoServerError as e:
                 if e.error_code == 'InvalidInstanceID.NotFound':
                     time.sleep(1)
                     continue
@@ -1146,7 +1156,7 @@ def create_instances(module, ec2, vpc, override_count=None):
         if instance_tags:
             try:
                 ec2.create_tags(instids, instance_tags)
-            except boto.exception.EC2ResponseError, e:
+            except boto.exception.EC2ResponseError as e:
                 module.fail_json(msg = "Instance tagging failed => %s: %s" % (e.error_code, e.error_message))
 
     instance_dict_array = []
@@ -1195,7 +1205,7 @@ def terminate_instances(module, ec2, instance_ids):
                 instance_dict_array.append(get_instance_info(inst))
                 try:
                     ec2.terminate_instances([inst.id])
-                except EC2ResponseError, e:
+                except EC2ResponseError as e:
                     module.fail_json(msg='Unable to terminate instance {0}, error: {1}'.format(inst.id, e))
                 changed = True
 
@@ -1209,7 +1219,7 @@ def terminate_instances(module, ec2, instance_ids):
                 filters={'instance-state-name':'terminated'})
             try:
                 num_terminated = len(response.pop().instances)
-            except Exception, e:
+            except Exception as e:
                 # got a bad response of some sort, possibly due to
                 # stale/cached data. Wait a second and then try again
                 time.sleep(1)
@@ -1301,7 +1311,7 @@ def startstop_instances(module, ec2, instance_ids, state, instance_tags):
                         inst.start()
                     else:
                         inst.stop()
-                except EC2ResponseError, e:
+                except EC2ResponseError as e:
                     module.fail_json(msg='Unable to change state for instance {0}, error: {1}'.format(inst.id, e))
                 changed = True
 
@@ -1323,6 +1333,78 @@ def startstop_instances(module, ec2, instance_ids, state, instance_tags):
     if wait and wait_timeout <= time.time():
         # waiting took too long
         module.fail_json(msg = "wait for instances running timeout on %s" % time.asctime())
+
+    return (changed, instance_dict_array, instance_ids)
+
+def restart_instances(module, ec2, instance_ids, state, instance_tags):
+    """
+    Restarts a list of existing instances
+
+    module: Ansible module object
+    ec2: authenticated ec2 connection object
+    instance_ids: The list of instances to start in the form of
+      [ {id: <inst-id>}, ..]
+    instance_tags: A dict of tag keys and values in the form of
+      {key: value, ... }
+    state: Intended state ("restarted")
+
+    Returns a dictionary of instance information
+    about the instances.
+
+    If the instance was not able to change state,
+    "changed" will be set to False.
+
+    Wait will not apply here as this is a OS level operation.
+
+    Note that if instance_ids and instance_tags are both non-empty,
+    this method will process the intersection of the two.
+    """
+
+    source_dest_check = module.params.get('source_dest_check')
+    termination_protection = module.params.get('termination_protection')
+    changed = False
+    instance_dict_array = []
+    source_dest_check = module.params.get('source_dest_check')
+    termination_protection = module.params.get('termination_protection')
+
+    if not isinstance(instance_ids, list) or len(instance_ids) < 1:
+        # Fail unless the user defined instance tags
+        if not instance_tags:
+            module.fail_json(msg='instance_ids should be a list of instances, aborting')
+
+    # To make an EC2 tag filter, we need to prepend 'tag:' to each key.
+    # An empty filter does no filtering, so it's safe to pass it to the
+    # get_all_instances method even if the user did not specify instance_tags
+    filters = {}
+    if instance_tags:
+        for key, value in instance_tags.items():
+            filters["tag:" + key] = value
+
+     # Check that our instances are not in the state we want to take
+
+    # Check (and eventually change) instances attributes and instances state
+    running_instances_array = []
+    for res in ec2.get_all_instances(instance_ids, filters=filters):
+        for inst in res.instances:
+
+            # Check "source_dest_check" attribute
+            if inst.get_attribute('sourceDestCheck')['sourceDestCheck'] != source_dest_check:
+                inst.modify_attribute('sourceDestCheck', source_dest_check)
+                changed = True
+
+            # Check "termination_protection" attribute
+            if inst.get_attribute('disableApiTermination')['disableApiTermination'] != termination_protection:
+                inst.modify_attribute('disableApiTermination', termination_protection)
+                changed = True
+
+            # Check instance state
+            if inst.state != state:
+                instance_dict_array.append(get_instance_info(inst))
+                try:
+                    inst.reboot()
+                except EC2ResponseError as e:
+                    module.fail_json(msg='Unable to change state for instance {0}, error: {1}'.format(inst.id, e))
+                changed = True
 
     return (changed, instance_dict_array, instance_ids)
 
@@ -1357,7 +1439,7 @@ def main():
             instance_ids = dict(type='list', aliases=['instance_id']),
             source_dest_check = dict(type='bool', default=True),
             termination_protection = dict(type='bool', default=False),
-            state = dict(default='present', choices=['present', 'absent', 'running', 'stopped']),
+            state = dict(default='present', choices=['present', 'absent', 'running', 'restarted', 'stopped']),
             exact_count = dict(type='int', default=None),
             count_tag = dict(),
             volumes = dict(type='list'),
@@ -1391,7 +1473,7 @@ def main():
     if region:
         try:
             vpc = connect_to_aws(boto.vpc, region, **aws_connect_kwargs)
-        except boto.exception.NoAuthHandlerFound, e:
+        except boto.exception.NoAuthHandlerFound as e:
             module.fail_json(msg = str(e))
     else:
         vpc = None
@@ -1414,6 +1496,14 @@ def main():
             module.fail_json(msg='running list needs to be a list of instances or set of tags to run: %s' % instance_ids)
 
         (changed, instance_dict_array, new_instance_ids) = startstop_instances(module, ec2, instance_ids, state, instance_tags)
+
+    elif state in ('restarted'):
+        instance_ids = module.params.get('instance_ids')
+        instance_tags = module.params.get('instance_tags')
+        if not (isinstance(instance_ids, list) or isinstance(instance_tags, dict)):
+            module.fail_json(msg='running list needs to be a list of instances or set of tags to run: %s' % instance_ids)
+
+        (changed, instance_dict_array, new_instance_ids) = restart_instances(module, ec2, instance_ids, state, instance_tags)
 
     elif state == 'present':
         # Changed is always set to true when provisioning new instances

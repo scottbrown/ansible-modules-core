@@ -145,7 +145,7 @@ except ImportError:
     pass
 
 
-NAME_PATTERN = re.compile(r"^[a-zA-Z0-9_]{1,61}[a-z0-9_]$")
+NAME_PATTERN = re.compile(r"^[a-zA-Z0-9]+[a-zA-Z0-9\._-]+[a-zA-Z0-9_]+$")
 
 
 def virtual_network_to_dict(vnet):
@@ -333,7 +333,7 @@ class AzureRMVirtualNetwork(AzureRMModuleBase):
                         ),
                         tags=results['tags']
                     )
-                    if results['dns_servers']:
+                    if results.get('dns_servers'):
                         vnet.dhcp_options = DhcpOptions(
                             dns_servers=results['dns_servers']
                         )
